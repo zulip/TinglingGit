@@ -15,6 +15,7 @@ def build_changed_files_dir(all_open_pulls):
         lines = [line for line in lines if line.startswith('diff')]
         for line in lines:
             files[line.split(' ')[2][2:]].append(open_pull['number'])
+        print("Fetched Diff:%s" % diff_url)
 
     return files
 
@@ -26,6 +27,7 @@ def fetch_open_pulls(upstream_path):
         responce = requests.get(url)
         all_pulls += responce.json()
         links = responce.headers['Link'].split(', ')
+        print("Fetched: %s" % url)
         url = ''
         for link in links:
             if 'next' in link.split('; ')[1]:
@@ -65,20 +67,26 @@ def check_for_gitrepo():
     if upstream and 'github.com' in upstream:
         return upstream
 
-    print('No upstream found in Current Directory')
+    print('No Github "upstream" found in Current Directory')
     sys.exit(1)
 
 def analyse():
 
+    print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
+    print("Github upstream found\n===>%s" % upstream)
     upstream_path = urlparse(upstream).path.split('.git')[0]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
     curdir_files = get_files_in_curdir()
     if len(curdir_files) < 1:
         print('No Files to check Possible conflicts in Current Directory')
         sys.exit(1)
+    print("Fetching Open Pulls from Upstream")
     all_open_pulls = fetch_open_pulls(upstream_path)
+    print("Fetching Open Pulls from Upstream Completed")
+    print("Fetching Diffs for all Open Pulls")
     changed_files = build_changed_files_dir(all_open_pulls)
+    print("Fetching Diffs Completed")
     for fn in curdir_files:
         if fn in changed_files:
             print('\033[91m' + fn + '\033[0m')
