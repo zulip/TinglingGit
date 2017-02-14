@@ -1,23 +1,63 @@
 import requests
 from urlparse import urlparse
 from collections import defaultdict
+from tornado import httpclient, gen, ioloop, queues
+from datetime import timedelta
 import os
 import sys
 import subprocess
 
-def build_changed_files_dir(all_open_pulls):
+@gen.coroutine
+def build_changed_files_dir(all_open_pulls, concurrency=10):
 
+    q = queues.Queue()
+    fetching, fetched = set(), set()
+    diffs = defaultdict(str)
+
+    @gen.coroutine
+    def fetch_diffs():
+        open_pull = yield q.get()
+        try:
+            if open_pull['diff_url'] in fetching:
+                return
+
+            fetching.add(open_pull['diff_url'])
+            diff = yield httpclient.AsyncHTTPClient().fetch(open_pull['diff_url'], raise_error=False)
+            if diff.code == 200:
+                fetched.add(open_pull['diff_url'])
+                print("Fetched Diff:%s" % open_pull['diff_url'])
+                diffs[open_pull['number']] = diff.body
+                if all_open_pulls:
+                    q.put(all_open_pulls.pop())
+                q.task_done()
+                return
+            all_open_pulls.append(open_pull)
+            fetching.remove(open_pull['diff_url'])
+        finally:
+            return
+
+    @gen.coroutine
+    def worker():
+        while True:
+            yield fetch_diffs()
+
+    for _ in range(concurrency):
+        if all_open_pulls:
+            q.put(all_open_pulls.pop())
+
+    for _ in range(concurrency):
+        worker()
+
+    yield q.join(timeout=timedelta(seconds=300))
+    assert fetching == fetched
     files = defaultdict(list)
-    for open_pull in all_open_pulls:
-        diff_url = open_pull['diff_url']
-        diff = requests.get(diff_url)
-        lines = diff.text.split('\n')
+    for diff in diffs:
+        lines = diffs[diff].text.split('\n')
         lines = [line for line in lines if line.startswith('diff')]
         for line in lines:
-            files[line.split(' ')[2][2:]].append(open_pull['number'])
-        print("Fetched Diff:%s" % diff_url)
+            files[line.split(' ')[2][2:]].append(diff)
 
-    return files
+    raise gen.Return(files)
 
 def fetch_open_pulls(upstream_path):
 
@@ -70,23 +110,29 @@ def check_for_gitrepo():
     print('No Github "upstream" found in Current Directory')
     sys.exit(1)
 
+@gen.coroutine
 def analyse():
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
     print("Github upstream found\n===>%s" % upstream)
+
     upstream_path = urlparse(upstream).path.split('.git')[0]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
     curdir_files = get_files_in_curdir()
+
     if len(curdir_files) < 1:
         print('No Files to check Possible conflicts in Current Directory')
         sys.exit(1)
+
     print("Fetching Open Pulls from Upstream")
     all_open_pulls = fetch_open_pulls(upstream_path)
     print("Fetching Open Pulls from Upstream Completed")
+
     print("Fetching Diffs for all Open Pulls")
-    changed_files = build_changed_files_dir(all_open_pulls)
+    changed_files = yield build_changed_files_dir(all_open_pulls)
     print("Fetching Diffs Completed")
+
     for fn in curdir_files:
         if fn in changed_files:
             print('\033[91m' + fn + '\033[0m')
@@ -94,4 +140,5 @@ def analyse():
             print('\033[92m' + fn + '\033[0m')
 
 if __name__ == '__main__':
-    analyse()
+    io_loop = ioloop.IOLoop.current()
+    io_loop.run_sync(analyse)
