@@ -8,7 +8,7 @@ import sys
 import subprocess
 
 @gen.coroutine
-def build_changed_files_dir(all_open_pulls, concurrency=10):
+def build_changed_files_dir(all_open_pulls, concurrency=20):
 
     q = queues.Queue()
     fetching, fetched = set(), set()
@@ -29,12 +29,12 @@ def build_changed_files_dir(all_open_pulls, concurrency=10):
                 diffs[open_pull['number']] = diff.body
                 if all_open_pulls:
                     q.put(all_open_pulls.pop())
-                q.task_done()
-                return
-            all_open_pulls.append(open_pull)
-            fetching.remove(open_pull['diff_url'])
+            else:
+                #all_open_pulls.append(open_pull)
+                fetching.remove(open_pull['diff_url'])
+
         finally:
-            return
+            q.task_done()
 
     @gen.coroutine
     def worker():
@@ -52,7 +52,7 @@ def build_changed_files_dir(all_open_pulls, concurrency=10):
     assert fetching == fetched
     files = defaultdict(list)
     for diff in diffs:
-        lines = diffs[diff].text.split('\n')
+        lines = diffs[diff].split('\n')
         lines = [line for line in lines if line.startswith('diff')]
         for line in lines:
             files[line.split(' ')[2][2:]].append(diff)
@@ -110,6 +110,19 @@ def check_for_gitrepo():
     print('No Github "upstream" found in Current Directory')
     sys.exit(1)
 
+def remove_prs(all_open_pulls):
+
+    for arg in sys.argv[1:]:
+        try:
+            pr = int(arg)
+            for x in range(0,len(all_open_pulls)):
+                if all_open_pulls[x]['number'] == pr:
+                    all_open_pulls = all_open_pulls[:x] + all_open_pulls[x+1:]
+                    break
+        except:
+            print(arg+" Not a valid PR")
+    return all_open_pulls
+
 @gen.coroutine
 def analyse():
 
@@ -127,6 +140,7 @@ def analyse():
 
     print("Fetching Open Pulls from Upstream")
     all_open_pulls = fetch_open_pulls(upstream_path)
+    all_open_pulls = remove_prs(all_open_pulls)
     print("Fetching Open Pulls from Upstream Completed")
 
     print("Fetching Diffs for all Open Pulls")
