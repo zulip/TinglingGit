@@ -29,8 +29,11 @@ def build_changed_files_dir(all_open_pulls, concurrency=20):
                 diffs[open_pull['number']] = diff.body
                 if all_open_pulls:
                     q.put(all_open_pulls.pop())
+            elif diff.code == 404:
+                fetching.remove(open_pull['diff_url'])
+                print("Not Found:%s" % open_pull['diff_url'])
             else:
-                #all_open_pulls.append(open_pull)
+                q.put(open_pull)
                 fetching.remove(open_pull['diff_url'])
 
         finally:
