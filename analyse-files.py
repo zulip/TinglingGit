@@ -104,6 +104,8 @@ def sort_prs():
     print("Github upstream found\n===>%s" % upstream)
 
     upstream_path = urlparse(upstream).path.split('.git')[0]
+    if '@' in upstream_path:
+        upstream_path = '/' + upstream_path.split(':')[1]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
     print("Fetching Open Pulls from Upstream")
     all_open_pulls = fetch_open_pulls(upstream_path)
@@ -164,6 +166,9 @@ def analyse(ignore_prs):
     print("Github upstream found\n===>%s" % upstream)
 
     upstream_path = urlparse(upstream).path.split('.git')[0]
+
+    if '@' in upstream_path:
+        upstream_path = '/' + upstream_path.split(':')[1]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
     curdir_files = get_files_in_curdir()
 
