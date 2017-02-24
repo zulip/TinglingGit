@@ -5,36 +5,48 @@ from tornado import httpclient, gen, ioloop, queues
 from datetime import timedelta
 import os
 import sys
+import json
+import argparse
 import subprocess
 
+def build_changed_files_dir(diffs):
+    files = defaultdict(list)
+    for diff in diffs:
+        for file in diffs[diff][0]:
+            files[file['filename']].append((diff, file['additions'], file['deletions'], file['changes']))
+    return files
+
 @gen.coroutine
-def build_changed_files_dir(all_open_pulls, concurrency=20):
+def fetch_diffs(all_open_pulls, concurrency=10):
 
     q = queues.Queue()
     fetching, fetched = set(), set()
-    diffs = defaultdict(str)
+    diffs = defaultdict(tuple)
 
     @gen.coroutine
-    def fetch_diffs():
+    def fetch_diff():
         open_pull = yield q.get()
         try:
-            if open_pull['diff_url'] in fetching:
+            if open_pull['url'] in fetching:
                 return
 
-            fetching.add(open_pull['diff_url'])
-            diff = yield httpclient.AsyncHTTPClient().fetch(open_pull['diff_url'], raise_error=False)
+            fetching.add(open_pull['url'])
+            diff = yield httpclient.AsyncHTTPClient(defaults=dict(user_agent="MyUserAgent")).fetch(open_pull['url']+'/files?client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba', raise_error=False)
             if diff.code == 200:
-                fetched.add(open_pull['diff_url'])
-                print("Fetched Diff:%s" % open_pull['diff_url'])
-                diffs[open_pull['number']] = diff.body
+                fetched.add(open_pull['url'])
+                print("Fetched :%s" % open_pull['url'])
+                diffs[open_pull['number']] = (json.loads(diff.body), open_pull['html_url'])
                 if all_open_pulls:
                     q.put(all_open_pulls.pop())
             elif diff.code == 404:
-                fetching.remove(open_pull['diff_url'])
-                print("Not Found:%s" % open_pull['diff_url'])
+                fetching.remove(open_pull['url'])
+                print("Not Found:%s" % open_pull['url'])
+            elif diff.code == 403:
+                fetching.remove(open_pull['url'])
+                print("Forbidden 403: " + open_pull['url'])
             else:
                 q.put(open_pull)
-                fetching.remove(open_pull['diff_url'])
+                fetching.remove(open_pull['url'])
 
         finally:
             q.task_done()
@@ -42,7 +54,7 @@ def build_changed_files_dir(all_open_pulls, concurrency=20):
     @gen.coroutine
     def worker():
         while True:
-            yield fetch_diffs()
+            yield fetch_diff()
 
     for _ in range(concurrency):
         if all_open_pulls:
@@ -53,19 +65,12 @@ def build_changed_files_dir(all_open_pulls, concurrency=20):
 
     yield q.join(timeout=timedelta(seconds=300))
     assert fetching == fetched
-    files = defaultdict(list)
-    for diff in diffs:
-        lines = diffs[diff].split('\n')
-        lines = [line for line in lines if line.startswith('diff')]
-        for line in lines:
-            files[line.split(' ')[2][2:]].append(diff)
-
-    raise gen.Return(files)
+    raise gen.Return(diffs)
 
 def fetch_open_pulls(upstream_path):
 
     all_pulls = []
-    url = 'https://api.github.com/repos' + upstream_path + '/pulls?state=open'
+    url = 'https://api.github.com/repos' + upstream_path + '/pulls?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba'
     while url:
         responce = requests.get(url)
         all_pulls += responce.json()
@@ -92,6 +97,31 @@ def get_files_in_curdir():
 
     return files
 
+@gen.coroutine
+def sort_prs():
+    print("Checking Directory for a Github repository...")
+    upstream = check_for_gitrepo()
+    print("Github upstream found\n===>%s" % upstream)
+
+    upstream_path = urlparse(upstream).path.split('.git')[0]
+    (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
+    print("Fetching Open Pulls from Upstream")
+    all_open_pulls = fetch_open_pulls(upstream_path)
+    print("Fetching Open Pulls from Upstream Completed")
+    print("Fetching Diffs for all Open Pulls")
+    diffs = yield fetch_diffs(all_open_pulls)
+    print("Fetching Diffs Completed\n")
+    all_open_pulls = []
+    for diff in diffs:
+        changes = 0
+        for file in diffs[diff][0]:
+            changes += file['changes']
+        all_open_pulls.append((diff, changes, diffs[diff][1]))
+    all_open_pulls.sort(key=lambda x: x[1])
+
+    for pull in all_open_pulls:
+        print('\033[92m[%d]: %s\033[0m' % (pull[1], pull[2]))
+
 def check_for_gitrepo():
 
     git_status = subprocess.Popen('git status'.split(' '),
@@ -113,9 +143,9 @@ def check_for_gitrepo():
     print('No Github "upstream" found in Current Directory')
     sys.exit(1)
 
-def remove_prs(all_open_pulls):
+def remove_prs(all_open_pulls, ignore_prs):
 
-    for arg in sys.argv[1:]:
+    for arg in ignore_prs:
         try:
             pr = int(arg)
             for x in range(0,len(all_open_pulls)):
@@ -123,11 +153,11 @@ def remove_prs(all_open_pulls):
                     all_open_pulls = all_open_pulls[:x] + all_open_pulls[x+1:]
                     break
         except:
-            print(arg+" Not a valid PR")
+            print(arg + " Not a valid PR")
     return all_open_pulls
 
 @gen.coroutine
-def analyse():
+def analyse(ignore_prs):
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
@@ -143,19 +173,39 @@ def analyse():
 
     print("Fetching Open Pulls from Upstream")
     all_open_pulls = fetch_open_pulls(upstream_path)
-    all_open_pulls = remove_prs(all_open_pulls)
+    all_open_pulls = remove_prs(all_open_pulls, ignore_prs)
     print("Fetching Open Pulls from Upstream Completed")
 
     print("Fetching Diffs for all Open Pulls")
-    changed_files = yield build_changed_files_dir(all_open_pulls)
+    diffs = yield fetch_diffs(all_open_pulls)
+    changed_files = build_changed_files_dir(diffs)
     print("Fetching Diffs Completed")
 
+    unsafe_files = []
     for fn in curdir_files:
         if fn in changed_files:
-            print('\033[91m' + fn + '\033[0m')
+            s = '\033[91m' + fn + '\033[0m'
+            for pr in changed_files[fn]:
+                s += ' [PR#'+str(pr[0])+'(+'+str(pr[1])+'-'+str(pr[2])+')'+']('+upstream.split('.git')[0]+'/pull/'+str(pr[0])+')'
+            unsafe_files.append(s)
         else:
             print('\033[92m' + fn + '\033[0m')
+    for fn in unsafe_files:
+        print(fn)
+
+def main():
+
+    parser = argparse.ArgumentParser(description="Determine Possible conflicts with open PR's")
+    parser.add_argument('--ignore-pr', metavar='N', type=int, nargs='+',
+                        default=[],help="PR's to ignore for conflict determination")
+    parser.add_argument('--sort-pr',default=False,action='store_true',
+                        help="Sort the open PR's according to size of diffstats")
+    args = parser.parse_args()
+    io_loop = ioloop.IOLoop.current()
+    if args.sort_pr:
+        io_loop.run_sync(sort_prs)
+    else:
+        io_loop.run_sync(lambda : analyse(args.ignore_pr))
 
 if __name__ == '__main__':
-    io_loop = ioloop.IOLoop.current()
-    io_loop.run_sync(analyse)
+    main()
