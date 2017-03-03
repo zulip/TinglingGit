@@ -24,6 +24,15 @@ So When this tool is run from a terminal with prompt sitting in a Git tracked di
     [3]: https://github.com/zulip/zulip/pull/1935<br>
 
   Here `[number]` means the number of changes introduced in that PR.
+* We can also list Stale issues by using `--stale-issues` as a argument paramater.<br>
+  ` python /path/to/TinglingGit/analyse-files.py --stale-issues`
+* The date older then which the issues should be considered stale could be specified by using `--older-then` argument.<br>
+  ` python /path/to/TinglingGit/analyse-files.py --stale-issues --older-then 20170128`<br>
+  This will list all issues which are updated before 28-01-2017.
+* We can also filter the issues based on labels defined in the repository.<br>
+  ` python /path/to/TinglingGit/analyse-files.py --stale-issues --labels 'area: tooling'`
+* A combination could be used as follows<br>
+  ` python /path/to/TinglingGit/analyse-files.py --stale-issues --older-then 20170128 --labels 'area: tooling'`
 
 #TODO
 

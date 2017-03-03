@@ -2,7 +2,8 @@ import requests
 from urlparse import urlparse
 from collections import defaultdict
 from tornado import httpclient, gen, ioloop, queues
-from datetime import timedelta
+from datetime import timedelta, datetime
+from collections import deque
 import os
 import sys
 import json
@@ -15,6 +16,75 @@ def build_changed_files_dir(diffs):
         for file in diffs[diff][0]:
             files[file['filename']].append((diff, file['additions'], file['deletions'], file['changes']))
     return files
+
+@gen.coroutine
+def fetch_all_open_issues(upstream_path, concurrency=10):
+
+    q = queues.Queue()
+    fetching, fetched = set(), set()
+    open_issues = deque()
+
+    url = 'https://api.github.com/repos' + upstream_path + '/issues?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba'
+    responce = requests.get(url)
+    links = responce.headers['Link'].split(', ')
+    print("Fetched: %s" % url)
+    for link in links:
+        if 'last' in link.split('; ')[1]:
+            url = link.split('; ')[0][1:][:-1]
+            break
+    queries = urlparse(url).query.split('&')
+    last_page = 1
+    for query in queries:
+        if 'page=' in query:
+            last_page = int(query.split('=')[1])
+            break
+    url_fetch_list = []
+    for i in range(1, last_page + 1):
+        url_fetch_list.append('https://api.github.com/repos' + upstream_path + '/issues?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba&page=' + str(i))
+
+    @gen.coroutine
+    def fetch_diff():
+        url = yield q.get()
+        try:
+            if url in fetching:
+                return
+
+            fetching.add(url)
+            issues = yield httpclient.AsyncHTTPClient(defaults=dict(user_agent="MyUserAgent")).fetch(url, raise_error=False)
+            if issues.code == 200:
+                fetched.add(url)
+                print("Fetched :%s" % url)
+                open_issues.extend(json.loads(issues.body))
+                if url_fetch_list:
+                    q.put(url_fetch_list.pop())
+            elif issues.code == 404:
+                fetching.remove(url)
+                print("Not Found:%s" % open_pull['url'])
+            elif issues.code == 403:
+                fetching.remove(url)
+                print("Forbidden 403: " + url)
+            else:
+                q.put(url)
+                fetching.remove(url)
+
+        finally:
+            q.task_done()
+
+    @gen.coroutine
+    def worker():
+        while True:
+            yield fetch_diff()
+
+    for _ in range(concurrency):
+        if url_fetch_list:
+            q.put(url_fetch_list.pop())
+
+    for _ in range(concurrency):
+        worker()
+
+    yield q.join(timeout=timedelta(seconds=300))
+    assert fetching == fetched
+    raise gen.Return(open_issues)
 
 @gen.coroutine
 def fetch_diffs(all_open_pulls, concurrency=10):
@@ -124,6 +194,51 @@ def sort_prs():
     for pull in all_open_pulls:
         print('\033[92m[%d]: %s\033[0m' % (pull[1], pull[2]))
 
+def all_in(list1, list2):
+    for item in list1:
+        if item not in list2:
+            return False
+    return True
+
+@gen.coroutine
+def stale_issues(labels, older_then, break_on):
+    print("Checking Directory for a Github repository...")
+    upstream = check_for_gitrepo()
+    print("Github upstream found\n===>%s" % upstream)
+
+    upstream_path = urlparse(upstream).path.split('.git')[0]
+    if '@' in upstream_path:
+        upstream_path = '/' + upstream_path.split(':')[1]
+    (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
+    print("Fetching Open issues from Upstream")
+    open_issues = yield fetch_all_open_issues(upstream_path)
+    print("Fetching Open issues from Upstream Completed")
+    list_stale_issues = []
+    for issue in open_issues:
+        if datetime.strptime(issue['updated_at'], '%Y-%m-%dT%H:%M:%SZ') < older_then:
+            list_stale_issues.append(issue)
+    label_filter_stale_issues = []
+    for issue in list_stale_issues:
+        issue_labels = [label['name'] for label in issue['labels']]
+        if all_in(labels, issue_labels):
+            label_filter_stale_issues.append(issue)
+    print("Fetched %d Issues" % len(label_filter_stale_issues))
+    if break_on:
+        break_issues_on_label = defaultdict(list)
+        for issue in label_filter_stale_issues:
+            for label in issue['labels']:
+                if break_on[0] in label['name']:
+                    break_issues_on_label[label['name']].append(issue)
+        break_issues_on_label = sorted(break_issues_on_label.items(), key= lambda (k,v): len(v))
+        for label in break_issues_on_label:
+            issues = label[1]
+            print("\nLabel '%s' has %d issues." % (label[0], len(issues)))
+            for issue in issues:
+                print('\033[92m %s\033[0m' % issue['html_url'])
+    else:
+        for issue in label_filter_stale_issues:
+            print('\033[92m %s\033[0m' % issue['html_url'])
+
 def check_for_gitrepo():
 
     git_status = subprocess.Popen('git status'.split(' '),
@@ -205,12 +320,28 @@ def main():
                         default=[],help="PR's to ignore for conflict determination")
     parser.add_argument('--sort-pr',default=False,action='store_true',
                         help="Sort the open PR's according to size of diffstats")
+    parser.add_argument('--stale-issues',default=False,action='store_true',
+                        help="This shows all issues in repo which have become stale (By Default older than 30 days)")
+    parser.add_argument('--older-then',metavar='N', type=str, nargs=1,default=False,
+                        help="This shows all issues in repo which have become stale and older then given date(Format for date is strictly YYYYMMDD)")
+    parser.add_argument('--labels', metavar='N', type=str, nargs='+',
+                        default=[],help="Labels to filter issues on. Use labels exactly they were defined for a Repo.\nExample 'area: tooling'")
+    parser.add_argument('--break-on', metavar='N', type=str, nargs=1,
+                        default=False,help="Using this we can break the list of issues based on a string in labels list.")
     args = parser.parse_args()
     io_loop = ioloop.IOLoop.current()
     if args.sort_pr:
         io_loop.run_sync(sort_prs)
-    else:
+    elif args.stale_issues:
+        if args.older_then:
+            older_then = datetime.strptime(args.older_then[0], '%Y%m%d')
+        else:
+            older_then = (datetime.now() - timedelta(days=30))
+        io_loop.run_sync(lambda : stale_issues(args.labels, older_then, args.break_on))
+    elif not args.older_then and not args.labels and not args.break_on:
         io_loop.run_sync(lambda : analyse(args.ignore_pr))
+    else:
+        print("Params not in correct combination")
 
 if __name__ == '__main__':
     main()
