@@ -105,7 +105,7 @@ def fetch_diffs(all_open_pulls, concurrency=10):
             if diff.code == 200:
                 fetched.add(open_pull['url'])
                 print("Fetched :%s" % open_pull['url'])
-                diffs[open_pull['number']] = (json.loads(diff.body), open_pull['html_url'])
+                diffs[open_pull['number']] = (json.loads(diff.body), open_pull['html_url'], open_pull['title'])
                 if all_open_pulls:
                     q.put(all_open_pulls.pop())
             elif diff.code == 404:
@@ -188,11 +188,11 @@ def sort_prs():
         changes = 0
         for file in diffs[diff][0]:
             changes += file['changes']
-        all_open_pulls.append((diff, changes, diffs[diff][1]))
+        all_open_pulls.append((diff, changes, diffs[diff][1], diffs[diff][2]))
     all_open_pulls.sort(key=lambda x: x[1])
 
     for pull in all_open_pulls:
-        print('\033[92m[%d]: %s\033[0m' % (pull[1], pull[2]))
+        print('\033[92m[%d]: %s (%s)\033[0m' % (pull[1], pull[3], pull[2]))
 
 def all_in(list1, list2):
     for item in list1:
