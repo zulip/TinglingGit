@@ -292,7 +292,7 @@ def remove_prs(all_open_pulls, ignore_prs):
     return all_open_pulls
 
 @gen.coroutine
-def analyse(ignore_prs, recursive):
+def analyse(ignore_prs, recursive, selective):
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
@@ -303,7 +303,14 @@ def analyse(ignore_prs, recursive):
     if '@' in upstream_path:
         upstream_path = '/' + upstream_path.split(':')[1]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
-    if recursive:
+    if selective:
+        print("Selective files mode. Enter newline char seperated filenames to be checked.\n'$'should be entered to mark End of Input.")
+        curdir_files = []
+        temp = raw_input()
+        while not temp == '$':
+            curdir_files.append(temp)
+            temp = raw_input()
+    elif recursive:
         curdir_files = get_files_in_curdir_recursive()
     else:
         curdir_files = get_files_in_curdir()
@@ -351,6 +358,8 @@ def main():
                         default=False,help="Using this we can break the list of issues based on a string in labels list.")
     parser.add_argument('--recursive', default=False, action='store_true',
                         help="Using this we can walk the current Directory recursively for checking files.")
+    parser.add_argument('--selective', default=False, action='store_true',
+                        help="Using this we can provide a selective list of files as input which will be classified as safe and unsafe.\nGenerally this option is used with a file redirected to input stream containing file names seperated by newline char.\nNote:End of input is marked by inputing a '$' symbol.")
     args = parser.parse_args()
     io_loop = ioloop.IOLoop.current()
     if args.sort_pr:
@@ -362,7 +371,7 @@ def main():
             older_then = (datetime.now() - timedelta(days=30))
         io_loop.run_sync(lambda : stale_issues(args.labels, older_then, args.break_on))
     elif not args.older_then and not args.labels and not args.break_on:
-        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive))
+        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive, args.selective))
     else:
         print("Params not in correct combination")
 
