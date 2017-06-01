@@ -50,6 +50,7 @@ modify are green but red otherwise.
   ` python /path/to/TinglingGit/analyse-files.py `
 * One may optionally specify a list of PR numbers to exclude from consideration.<br>
   ` python /path/to/TinglingGit/analyse-files.py --ignore-pr 3658 4125` will exclude PR 3658 and 4125 from consideration.
+* `--recursive` could be used when TinglingGit should consider all files recursively in current directory.
 * After tool successfully completes executing files are displayed with green to represent safe and red to represent possible merge conflicts.
 * If we want to list the PR's in increasing order of changes introduced by the PR. Simple do<br>
   ` python /path/to/TinglingGit/analyse-files.py --sort-pr`

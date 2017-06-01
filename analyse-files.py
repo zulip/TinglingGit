@@ -178,6 +178,18 @@ def get_files_in_curdir():
 
     return sorted(files, key= lambda file_path: file_path.split('/')[-1])
 
+def get_files_in_curdir_recursive():
+
+    git_tracking_rootdir = subprocess.check_output(
+                           'git rev-parse --show-toplevel'.split(' ')).strip()
+
+    files = []
+    for (dirroot, subdirs, dirfiles) in os.walk(os.getcwd()):
+        files = files + [ os.path.relpath(os.path.join(dirroot, file),
+                  git_tracking_rootdir) for file in dirfiles]
+
+    return files
+
 @gen.coroutine
 def sort_prs():
     print("Checking Directory for a Github repository...")
@@ -280,7 +292,7 @@ def remove_prs(all_open_pulls, ignore_prs):
     return all_open_pulls
 
 @gen.coroutine
-def analyse(ignore_prs):
+def analyse(ignore_prs, recursive):
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
@@ -291,7 +303,10 @@ def analyse(ignore_prs):
     if '@' in upstream_path:
         upstream_path = '/' + upstream_path.split(':')[1]
     (owner, repo) = urlparse(upstream).path.split('.git')[0][1:].split('/')
-    curdir_files = get_files_in_curdir()
+    if recursive:
+        curdir_files = get_files_in_curdir_recursive()
+    else:
+        curdir_files = get_files_in_curdir()
 
     if len(curdir_files) < 1:
         print('No Files to check Possible conflicts in Current Directory')
@@ -334,6 +349,8 @@ def main():
                         default=[],help="Labels to filter issues on. Use labels exactly they were defined for a Repo.\nExample 'area: tooling'")
     parser.add_argument('--break-on', metavar='N', type=str, nargs=1,
                         default=False,help="Using this we can break the list of issues based on a string in labels list.")
+    parser.add_argument('--recursive', default=False, action='store_true',
+                        help="Using this we can walk the current Directory recursively for checking files.")
     args = parser.parse_args()
     io_loop = ioloop.IOLoop.current()
     if args.sort_pr:
@@ -345,7 +362,7 @@ def main():
             older_then = (datetime.now() - timedelta(days=30))
         io_loop.run_sync(lambda : stale_issues(args.labels, older_then, args.break_on))
     elif not args.older_then and not args.labels and not args.break_on:
-        io_loop.run_sync(lambda : analyse(args.ignore_pr))
+        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive))
     else:
         print("Params not in correct combination")
 
