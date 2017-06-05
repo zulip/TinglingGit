@@ -51,7 +51,8 @@ modify are green but red otherwise.
 * One may optionally specify a list of PR numbers to exclude from consideration.<br>
   ` python /path/to/TinglingGit/analyse-files.py --ignore-pr 3658 4125` will exclude PR 3658 and 4125 from consideration.
 * `--recursive` could be used when TinglingGit should consider all files recursively in current directory.
-* `--selective` can be used to input selected filenames to be classified as safe and unsafe.<br>Note: `$` will mark end of input. 
+* `--selective` can be used to input selected filenames to be classified as safe and unsafe.<br>Note: `$` will mark end of input.
+* `--safe-rep` can be used to perform repetitive tasks upon different files and commit only changes which are safe with respect to causing merge conflicts to other PR's. The code to handle repetitive task could be placed by developer under execute_task() function.
 * After tool successfully completes executing files are displayed with green to represent safe and red to represent possible merge conflicts.
 * If we want to list the PR's in increasing order of changes introduced by the PR. Simple do<br>
   ` python /path/to/TinglingGit/analyse-files.py --sort-pr`

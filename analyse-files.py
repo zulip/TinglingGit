@@ -23,6 +23,56 @@ if access_token == 'add-token-here':
     print('Please configure Github Authentication settings in tinglinggit.ini.')
     exit(1)
 
+# This function could be used to specify the script for repetitive task.
+@gen.coroutine
+def execute_task(fn, associated_prs=[], root_dir=''):
+    # Remove this return statement after adding custom SCRIPT
+    return -1
+
+    COMMON_PREFIX_COMMIT_MSG = ''
+    # NOTE: Do not modify values of fn, associated_prs or root_dir in the custom script.
+    # #######SCRIPT BEGINS HERE#########
+    ####################################
+    # #######SCRIPT ENDS HERE###########
+
+    # raw_input() to wait for review upon changes and  proceed further
+    raw_input()
+
+    # Commit changes done to file
+    commit_cur_change = subprocess.check_output(
+                        ['git', 'add', os.path.join(root_dir,fn)]).strip()
+    commit_cur_change = subprocess.check_output(
+                        ['git', 'commit', '-m', COMMON_PREFIX_COMMIT_MSG+" "+fn.split('/')[-1]+"."]).strip()
+    commit_status = 1
+    print(commit_cur_change)
+    current_branch = subprocess.check_output(
+                     ['git', 'status']).strip().split('\n')[0].split(' ')[-1]
+    print(current_branch)
+
+    for prnum in associated_prs:
+        t = subprocess.check_output(('git fetch upstream pull/%s/head:test-%s' % (prnum,prnum)).split(' ')).strip()
+        t = subprocess.check_output(('git checkout test-%s' % (prnum)).split(' ')).strip()
+
+        try:
+            check_cur_commit = subprocess.check_output(
+                               ('git rebase %s' % (current_branch)).split(' ')).strip()
+        except:
+            t = subprocess.check_output('git rebase --abort'.split(' ')).strip()
+            commit_status = 0
+
+        t = subprocess.check_output(('git checkout %s' % (current_branch)).split(' ')).strip()
+        t = subprocess.check_output(('git branch -D test-%s' % (prnum)).split(' ')).strip()
+        print(t)
+        if not commit_status:
+            break
+    # If commit is not safe revert the last commit
+    if not commit_status:
+        t = subprocess.check_output('git reset --hard HEAD~1'.split(' ')).strip()
+        print(t)
+        return 0
+    else:
+        return 1
+
 def build_changed_files_dir(diffs):
     files = defaultdict(list)
     for diff in diffs:
@@ -292,7 +342,33 @@ def remove_prs(all_open_pulls, ignore_prs):
     return all_open_pulls
 
 @gen.coroutine
-def analyse(ignore_prs, recursive, selective):
+def do_repetitive_task_safely(curdir_files, changed_files):
+    potential_unsafe_files = [fn for fn in curdir_files if fn in changed_files]
+    safe_files = [fn for fn in curdir_files if fn not in changed_files]
+    safely_done = []
+    git_tracking_rootdir = subprocess.check_output(
+                           'git rev-parse --show-toplevel'.split(' ')).strip()
+    print("Beginning to perform repetitive task over files.")
+    for fn in safe_files:
+        status = yield execute_task(fn, root_dir=git_tracking_rootdir)
+        if status == 1:
+            safely_done.append(fn)
+        elif status == -1:
+            print("ERROR: Custom script not added.")
+    for fn in potential_unsafe_files:
+        associated_prs = [str(pr[0]) for pr in changed_files[fn]]
+        status = yield execute_task(fn, associated_prs, root_dir=git_tracking_rootdir)
+        if status == 1:
+            safely_done.append(fn)
+        elif status == -1:
+            print("ERROR: Custom script not added.")
+    # Print Filenames which were safely commited
+    for fn in safely_done:
+        print("'%s'," % (fn))
+
+
+@gen.coroutine
+def analyse(ignore_prs, recursive, selective, safe_rep):
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
@@ -341,6 +417,9 @@ def analyse(ignore_prs, recursive, selective):
     for fn in unsafe_files:
         print(fn)
 
+    if safe_rep:
+        yield do_repetitive_task_safely(curdir_files, changed_files)
+
 def main():
 
     parser = argparse.ArgumentParser(description="Determine Possible conflicts with open PR's")
@@ -360,6 +439,8 @@ def main():
                         help="Using this we can walk the current Directory recursively for checking files.")
     parser.add_argument('--selective', default=False, action='store_true',
                         help="Using this we can provide a selective list of files as input which will be classified as safe and unsafe.\nGenerally this option is used with a file redirected to input stream containing file names seperated by newline char.\nNote:End of input is marked by inputing a '$' symbol.")
+    parser.add_argument('--safe-rep', default=False, action='store_true',
+                        help="Using this we can perform repetitive tasks upon different files and commit only changes which are\nsafe with respect to causing merge conflicts to other PR's.\nThe code to handle repetitive task could be placed\nby developer under execute_task() function.")
     args = parser.parse_args()
     io_loop = ioloop.IOLoop.current()
     if args.sort_pr:
@@ -371,7 +452,7 @@ def main():
             older_then = (datetime.now() - timedelta(days=30))
         io_loop.run_sync(lambda : stale_issues(args.labels, older_then, args.break_on))
     elif not args.older_then and not args.labels and not args.break_on:
-        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive, args.selective))
+        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive, args.selective, args.safe_rep))
     else:
         print("Params not in correct combination")
 
