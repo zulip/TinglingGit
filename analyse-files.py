@@ -165,7 +165,7 @@ def get_files_in_curdir():
     files = [ os.path.relpath(os.path.join(os.getcwd(),file),
               git_tracking_rootdir) for file in files]
 
-    return files
+    return sorted(files, key= lambda file_path: file_path.split('/')[-1])
 
 @gen.coroutine
 def sort_prs():
