@@ -306,7 +306,7 @@ def analyse(ignore_prs):
         if fn in changed_files:
             s = '\033[91m' + fn + '\033[0m'
             for pr in changed_files[fn]:
-                s += ' [PR#'+str(pr[0])+'(+'+str(pr[1])+'-'+str(pr[2])+')'+']('+upstream.split('.git')[0]+'/pull/'+str(pr[0])+')'
+                s += ' [PR#'+str(pr[0])+'(+'+str(pr[1])+'-'+str(pr[2])+')'+'](https://github.com'+upstream_path+'/pull/'+str(pr[0])+')'
             unsafe_files.append(s)
         else:
             print('\033[92m' + fn + '\033[0m')
