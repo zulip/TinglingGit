@@ -25,7 +25,7 @@ if access_token == 'add-token-here':
 
 # This function could be used to specify the script for repetitive task.
 @gen.coroutine
-def execute_task(fn, associated_prs=[], root_dir=''):
+def execute_task(fn, associated_prs=[], root_dir='', rebase_check=False):
     # Remove this return statement after adding custom SCRIPT
     return -1
 
@@ -49,6 +49,9 @@ def execute_task(fn, associated_prs=[], root_dir=''):
                      ['git', 'status']).strip().split('\n')[0].split(' ')[-1]
     print(current_branch)
 
+    if not rebase_check:
+        associated_prs = []
+
     for prnum in associated_prs:
         t = subprocess.check_output(('git fetch upstream pull/%s/head:test-%s' % (prnum,prnum)).split(' ')).strip()
         t = subprocess.check_output(('git checkout test-%s' % (prnum)).split(' ')).strip()
@@ -65,7 +68,7 @@ def execute_task(fn, associated_prs=[], root_dir=''):
         print(t)
         if not commit_status:
             break
-    # If commit is not safe revert the last commit
+    # If commit is not safe, revert the last commit
     if not commit_status:
         t = subprocess.check_output('git reset --hard HEAD~1'.split(' ')).strip()
         print(t)
@@ -342,7 +345,7 @@ def remove_prs(all_open_pulls, ignore_prs):
     return all_open_pulls
 
 @gen.coroutine
-def do_repetitive_task_safely(curdir_files, changed_files):
+def do_repetitive_task_safely(curdir_files, changed_files, rebase_check):
     potential_unsafe_files = [fn for fn in curdir_files if fn in changed_files]
     safe_files = [fn for fn in curdir_files if fn not in changed_files]
     safely_done = []
@@ -350,14 +353,14 @@ def do_repetitive_task_safely(curdir_files, changed_files):
                            'git rev-parse --show-toplevel'.split(' ')).strip()
     print("Beginning to perform repetitive task over files.")
     for fn in safe_files:
-        status = yield execute_task(fn, root_dir=git_tracking_rootdir)
+        status = yield execute_task(fn, root_dir=git_tracking_rootdir, rebase_check=rebase_check)
         if status == 1:
             safely_done.append(fn)
         elif status == -1:
             print("ERROR: Custom script not added.")
     for fn in potential_unsafe_files:
         associated_prs = [str(pr[0]) for pr in changed_files[fn]]
-        status = yield execute_task(fn, associated_prs, root_dir=git_tracking_rootdir)
+        status = yield execute_task(fn, associated_prs, root_dir=git_tracking_rootdir, rebase_check=rebase_check)
         if status == 1:
             safely_done.append(fn)
         elif status == -1:
@@ -368,7 +371,7 @@ def do_repetitive_task_safely(curdir_files, changed_files):
 
 
 @gen.coroutine
-def analyse(ignore_prs, recursive, selective, safe_rep):
+def analyse(ignore_prs, recursive, selective, safe_rep, rebase_check):
 
     print("Checking Directory for a Github repository...")
     upstream = check_for_gitrepo()
@@ -418,7 +421,7 @@ def analyse(ignore_prs, recursive, selective, safe_rep):
         print(fn)
 
     if safe_rep:
-        yield do_repetitive_task_safely(curdir_files, changed_files)
+        yield do_repetitive_task_safely(curdir_files, changed_files, rebase_check)
 
 def main():
 
@@ -441,6 +444,8 @@ def main():
                         help="Using this we can provide a selective list of files as input which will be classified as safe and unsafe.\nGenerally this option is used with a file redirected to input stream containing file names seperated by newline char.\nNote:End of input is marked by inputing a '$' symbol.")
     parser.add_argument('--safe-rep', default=False, action='store_true',
                         help="Using this we can perform repetitive tasks upon different files and commit only changes which are\nsafe with respect to causing merge conflicts to other PR's.\nThe code to handle repetitive task could be placed\nby developer under execute_task() function.")
+    parser.add_argument('--rebase-check', default=False, action='store_true',
+                        help="Using this while performing repetitive tasks, we can do a rebase over PR's which might get\nconflicted by changes to a particular file and see if that actually\nhappens and commit or revert the commit accordingly.")
     args = parser.parse_args()
     io_loop = ioloop.IOLoop.current()
     if args.sort_pr:
@@ -452,7 +457,7 @@ def main():
             older_then = (datetime.now() - timedelta(days=30))
         io_loop.run_sync(lambda : stale_issues(args.labels, older_then, args.break_on))
     elif not args.older_then and not args.labels and not args.break_on:
-        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive, args.selective, args.safe_rep))
+        io_loop.run_sync(lambda : analyse(args.ignore_pr, args.recursive, args.selective, args.safe_rep, args.rebase_check))
     else:
         print("Params not in correct combination")
 
