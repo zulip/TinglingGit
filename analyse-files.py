@@ -169,10 +169,8 @@ def fetch_open_pulls(upstream_path):
 
 def get_files_in_curdir():
 
-    git_tracking_rootdir = subprocess.Popen(
-                           'git rev-parse --show-toplevel'.split(' '),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT).stdout.read().strip()
+    git_tracking_rootdir = subprocess.check_output(
+                           'git rev-parse --show-toplevel'.split(' ')).strip()
 
     files = filter(os.path.isfile,os.listdir(os.getcwd()))
     files = [ os.path.relpath(os.path.join(os.getcwd(),file),
@@ -254,18 +252,13 @@ def stale_issues(labels, older_then, break_on):
 
 def check_for_gitrepo():
 
-    git_status = subprocess.Popen('git status'.split(' '),
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT)
+    git_status = subprocess.check_output('git status'.split(' '))
 
-    if 'Not a git repository' in git_status.stdout.read():
+    if 'Not a git repository' in git_status:
         print('Not a git repository')
         sys.exit(1)
 
-    upstream = subprocess.Popen('git config --get remote.upstream.url'.split(' '),
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-    upstream = upstream.stdout.read()
+    upstream = subprocess.check_output('git config --get remote.upstream.url'.split(' '))
 
     if upstream and 'github.com' in upstream:
         return upstream
