@@ -44,6 +44,7 @@ modify are green but red otherwise.
 * Clone or download and extract this repository.
 * Open the TinglingGit Directory in terminal and install dependancies.<br>
   ` pip install -r requirements.txt `
+* Configure github settings by creating a personal access token at https://github.com/settings/tokens and adding it to tinglinggit.ini. Note that no special scope privileges are required by TinglingGit.
 * Open a terminal to a git tracked directory with upstream setup for remote repo.
 * Run the tool from within the Directory you wanna analyse files for.<br>
   ` python /path/to/TinglingGit/analyse-files.py `

@@ -9,6 +9,19 @@ import sys
 import json
 import argparse
 import subprocess
+import configparser
+
+TINGLINGGIT_ROOT = os.path.split(os.path.abspath(__file__))[0]
+TINGLINGGIT_SETTINGS_PATH = os.path.join(TINGLINGGIT_ROOT, 'tinglinggit.ini')
+
+config = configparser.ConfigParser()
+config.read(TINGLINGGIT_SETTINGS_PATH)
+
+access_token = config['GITHUB']['GITHUB_TOKEN']
+
+if access_token == 'add-token-here':
+    print('Please configure Github Authentication settings in tinglinggit.ini.')
+    exit(1)
 
 def build_changed_files_dir(diffs):
     files = defaultdict(list)
@@ -24,7 +37,7 @@ def fetch_all_open_issues(upstream_path, concurrency=10):
     fetching, fetched = set(), set()
     open_issues = deque()
 
-    url = 'https://api.github.com/repos' + upstream_path + '/issues?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba'
+    url = 'https://api.github.com/repos' + upstream_path + '/issues?state=open&access_token=' + access_token
     responce = requests.get(url)
     links = responce.headers['Link'].split(', ')
     print("Fetched: %s" % url)
@@ -40,7 +53,7 @@ def fetch_all_open_issues(upstream_path, concurrency=10):
             break
     url_fetch_list = []
     for i in range(1, last_page + 1):
-        url_fetch_list.append('https://api.github.com/repos' + upstream_path + '/issues?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba&page=' + str(i))
+        url_fetch_list.append('https://api.github.com/repos' + upstream_path + '/issues?state=open&access_token=' + access_token + '&page=' + str(i))
 
     @gen.coroutine
     def fetch_diff():
@@ -101,7 +114,7 @@ def fetch_diffs(all_open_pulls, concurrency=10):
                 return
 
             fetching.add(open_pull['url'])
-            diff = yield httpclient.AsyncHTTPClient(defaults=dict(user_agent="MyUserAgent")).fetch(open_pull['url']+'/files?client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba', raise_error=False)
+            diff = yield httpclient.AsyncHTTPClient(defaults=dict(user_agent="MyUserAgent")).fetch(open_pull['url']+'/files?access_token=' + access_token, raise_error=False)
             if diff.code == 200:
                 fetched.add(open_pull['url'])
                 print("Fetched :%s" % open_pull['url'])
@@ -140,7 +153,7 @@ def fetch_diffs(all_open_pulls, concurrency=10):
 def fetch_open_pulls(upstream_path):
 
     all_pulls = []
-    url = 'https://api.github.com/repos' + upstream_path + '/pulls?state=open&client_id=839a7c4a6d814e6287e9&client_secret=a91cf8513410fb64750374cf410607e4ab4a8bba'
+    url = 'https://api.github.com/repos' + upstream_path + '/pulls?state=open&access_token=' + access_token
     while url:
         responce = requests.get(url)
         all_pulls += responce.json()
